@@ -1,6 +1,7 @@
 """퍼널 주요 지표·추이, 카테고리별 첫 조회 성과, 퍼널, 리텐션 Streamlit 대시보드.
 
 실행: 프로젝트 루트에서 streamlit run analysis/07_dashboard.py
+선택한 탭만 계산한다(st.tabs on_change="rerun"). 닫힌 탭의 위젯 값은 session_state에 다시 써서 유지하므로 탭 안의 모든 위젯에는 key가 있어야 한다.
 입력: data/processed/dashboard/*.parquet (analysis/19_export_dashboard_data.py가 data/processed의 CSV에서 만든 배포용 파일, 약 33MB)
   events.parquet     탭 1: 주요 지표·추이 (UTC 기준, 완전 중복 제거, 2015-09-15 21:00 UTC 미만)
   first_view.parquet 탭 2: 카테고리별 첫 조회 성과
@@ -67,8 +68,13 @@ def load_events():
     df["transactionid"] = df["transactionid"].where(df["transactionid"] >= 0).astype("float64")  # -1은 결측(구매가 아닌 행)
     df["date"] = day_to_datetime(df["day"])  # UTC 기준, 시간대 변환 없음
     df["month"] = df["date"].dt.to_period("M").dt.to_timestamp()
-    data_start = pd.to_datetime(json.loads(META.read_text(encoding="utf-8"))["data_start_ms"], unit="ms")
-    return df.drop(columns="day"), data_start
+    return df.drop(columns="day"), load_data_start()
+
+
+@st.cache_data(show_spinner=False)
+def load_data_start():
+    """데이터의 첫 이벤트 시각(UTC). 이벤트 전체를 읽지 않고 meta.json만 읽는다."""
+    return pd.to_datetime(json.loads(META.read_text(encoding="utf-8"))["data_start_ms"], unit="ms")
 
 
 @st.cache_data(show_spinner="첫 조회 데이터를 불러오는 중입니다...")
@@ -79,12 +85,7 @@ def load_first_view():
     fv["categoryid"] = fv["categoryid"].astype("int32")
     fv["root_categoryid"] = fv["root_categoryid"].astype("int32")
     fv["date"] = day_to_datetime(fv["day"]).astype("datetime64[ns]")
-    # 30일 재방문: 첫 조회일로부터 정확히 30일째 날짜에 이벤트(종류·상품 무관)가 있으면 재방문으로 센다.
-    day30 = fv["date"] + pd.Timedelta(days=30)
-    fv["obs30"] = day30 <= LAST_DATE  # 30일째가 관측 기간 안에 있는 방문자만 분모에 넣는다
-    active = load_events()[0][["visitorid", "date"]].drop_duplicates().astype({"date": "datetime64[ns]"})
-    returned = pd.MultiIndex.from_frame(active)
-    fv["ret30"] = pd.MultiIndex.from_arrays([fv["visitorid"], day30], names=["visitorid", "date"]).isin(returned)
+    # 30일 재방문(ret30)과 30일째가 관측 기간 안인지(obs30)는 analysis/19_export_dashboard_data.py가 미리 계산해 두었다.
     return fv.drop(columns="day")
 
 
@@ -443,12 +444,12 @@ def render_first_view_tab(fv, start_date, end_date):
         return
     exclude_early = st.checkbox(
         "시작 4주(2015-05-03~05-30)에 처음 조회한 방문자 제외",
-        value=False,
+        value=False, key="fv_early",
         help="데이터 시작 전의 행동이 관측되지 않아, 이 기간의 '첫 조회'는 실제 첫 조회가 아닐 수 있습니다.",
     )
     ctl1, ctl2 = st.columns([3, 2])
     metric_name = ctl1.radio(
-        "순위·그래프 기준 지표", list(METRIC_CHOICES), horizontal=True,
+        "순위·그래프 기준 지표", list(METRIC_CHOICES), horizontal=True, key="fv_metric",
         help="아래 상위 10 순위, 그래프, 표의 정렬이 이 지표 기준으로 바뀝니다. 네 지표는 모든 표에 함께 표시됩니다.",
     )
     metric = METRIC_CHOICES[metric_name]
@@ -539,7 +540,7 @@ def render_first_view_tab(fv, start_date, end_date):
     root_all = pd.concat([root_all[root_all["root_categoryid"] != UNKNOWN], root_all[root_all["root_categoryid"] == UNKNOWN]], ignore_index=True)
     root_rows = {r["root_categoryid"]: r for _, r in root_all.iterrows()}
     root_sel = st.selectbox(
-        "대분류 선택", [None] + root_all["root_categoryid"].tolist(),
+        "대분류 선택", [None] + root_all["root_categoryid"].tolist(), key="fv_root",
         format_func=lambda v: f"전체 ({total:,}명)" if v is None else option_text(root_label(v), int(root_rows[v]["visitors"]), root_rows[v]),
     )
     c1, c2 = st.columns([2, 3])
@@ -570,7 +571,7 @@ def render_first_view_tab(fv, start_date, end_date):
     else:
         cat_rows = {(r["root_categoryid"], r["categoryid"]): r for _, r in cat_all.iterrows()}
         cat_sel = st.selectbox(
-            "카테고리 선택", [None] + list(cat_rows),
+            "카테고리 선택", [None] + list(cat_rows), key="fv_cat",
             format_func=lambda v: f"전체 ({int(cat_all['visitors'].sum()):,}명)" if v is None
             else option_text(cat_label(*v), int(cat_rows[v]["visitors"]), cat_rows[v]),
         )
@@ -1417,7 +1418,7 @@ def render_retention_tab(r):
 if not EVENTS.exists():
     st.error("대시보드 데이터(data/processed/dashboard/)가 없습니다. 먼저 `python analysis/19_export_dashboard_data.py`를 실행하세요.")
     st.stop()
-events, data_start = load_events()
+data_start = load_data_start()
 min_date, max_date = data_start.normalize().date(), (DATA_END - pd.Timedelta(seconds=1)).normalize().date()
 
 st.title("📊 퍼널 주요 지표 대시보드")
@@ -1439,12 +1440,25 @@ if not isinstance(picked, (tuple, list)) or len(picked) != 2:
     st.stop()
 start_date, end_date = pd.Timestamp(picked[0]), pd.Timestamp(picked[1])
 
-tab_trend, tab_first_view, tab_funnel, tab_retention = st.tabs(["주요 지표 · 추이", "카테고리별 첫 조회 성과", "퍼널", "리텐션"])
-with tab_trend:
-    render_trend_tab(events, data_start, start_date, end_date, load_first_view())
-with tab_first_view:
-    render_first_view_tab(load_first_view(), start_date, end_date)
-with tab_funnel:
-    render_funnel_tab(load_funnel(), start_date, end_date)
-with tab_retention:
-    render_retention_tab(load_retention())
+# st.tabs는 기본적으로 네 탭을 매번 모두 계산한다. 선택된 탭만 계산해 메모리와 실행 시간을 줄인다(on_change="rerun").
+# 계산하지 않은 탭의 위젯은 Streamlit이 상태를 지우므로, 닫힌 탭의 위젯 값은 session_state에 다시 써서 돌아왔을 때 유지한다.
+TAB_NAMES = ["주요 지표 · 추이", "카테고리별 첫 조회 성과", "퍼널", "리텐션"]
+TAB_RENDERERS = {
+    TAB_NAMES[0]: lambda: render_trend_tab(load_events()[0], data_start, start_date, end_date, load_first_view()),
+    TAB_NAMES[1]: lambda: render_first_view_tab(load_first_view(), start_date, end_date),
+    TAB_NAMES[2]: lambda: render_funnel_tab(load_funnel(), start_date, end_date),
+    TAB_NAMES[3]: lambda: render_retention_tab(load_retention()),
+}
+tab_widget_keys = st.session_state.setdefault("_tab_widget_keys", {})  # 탭 이름 → 그 탭의 위젯 키
+tabs = st.tabs(TAB_NAMES, key="main_tab", on_change="rerun")
+open_index = next((i for i, tab in enumerate(tabs) if tab.open), 0)
+open_name = TAB_NAMES[open_index]
+for name in TAB_NAMES:
+    if name != open_name:
+        for key in tab_widget_keys.get(name, ()):
+            if key in st.session_state:
+                st.session_state[key] = st.session_state[key]
+keys_before = set(st.session_state.keys())
+with tabs[open_index]:
+    TAB_RENDERERS[open_name]()
+tab_widget_keys.setdefault(open_name, set()).update(set(st.session_state.keys()) - keys_before)

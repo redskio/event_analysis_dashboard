@@ -9,11 +9,16 @@
   - 날짜: DAY0(2015-05-03)부터의 일수(int16). 이벤트 시각의 시·분·초는 대시보드가 쓰지 않으므로 일 단위만 남긴다.
   - 데이터 시작 시각(첫 이벤트의 밀리초)은 meta.json에 따로 저장한다.
   - 소요 시간은 밀리초 정수(int32), 횟수는 int16로 저장하고 전환이 없으면 -1이다.
+  - first_view.parquet에는 30일 재방문(ret30)과 관찰 가능 여부(obs30)를 미리 계산해 넣는다. 대시보드가 실행할 때
+    이벤트 전체와 (방문자, 날짜) 쌍을 맞추면 메모리를 많이 쓰기 때문이다.
+      obs30: 첫 조회일 + 30일이 마지막 관측일(2015-09-15) 이내
+      ret30: 첫 조회일로부터 정확히 30일째 날짜에 이벤트(종류·상품 무관)가 있는 방문자
 행 순서는 원본 CSV와 같게 유지한다.
 """
 import json
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 PROCESSED = Path("data/processed")
@@ -21,6 +26,7 @@ OUT = PROCESSED / "dashboard"
 DAY0 = pd.Timestamp("2015-05-03")
 DAY_MS = 86_400_000
 DAY0_MS = DAY0.value // 1_000_000
+LAST_DAY = (pd.Timestamp("2015-09-15") - DAY0).days  # 마지막 관측일(UTC)의 DAY0 기준 일수
 
 
 def to_days_from_date_string(s):
@@ -65,18 +71,25 @@ f = pd.read_csv(PROCESSED / "first_view_visitors.csv",
                 usecols=["visitorid", "first_view_date", "first_view_in_first_4weeks", "itemid", "categoryid", "root_categoryid",
                          "carted_after_first_view", "purchased_after_first_view"],
                 dtype={"visitorid": "int32", "itemid": "int32", "categoryid": "Int64", "root_categoryid": "Int64"})
+fv_day = to_days_from_date_string(f["first_view_date"])
+# (방문자, 날짜) 쌍을 정수 하나로 합쳐 비교한다. day는 0~135이므로 65536을 곱해도 겹치지 않는다.
+active_keys = np.unique(events["visitorid"].to_numpy(dtype="int64") * 65536 + events["day"].to_numpy(dtype="int64"))
+ret_keys = f["visitorid"].to_numpy(dtype="int64") * 65536 + (fv_day.to_numpy(dtype="int64") + 30)
 first_view = pd.DataFrame(
     {
         "visitorid": f["visitorid"],
-        "day": to_days_from_date_string(f["first_view_date"]),
+        "day": fv_day,
         "early": f["first_view_in_first_4weeks"].astype(bool),
         "itemid": f["itemid"],
         "categoryid": to_int16(f["categoryid"].fillna(-1).astype("int64"), "categoryid"),
         "root_categoryid": to_int16(f["root_categoryid"].fillna(-1).astype("int64"), "root_categoryid"),
         "carted": f["carted_after_first_view"].astype(bool),
         "purchased": f["purchased_after_first_view"].astype(bool),
+        "obs30": (fv_day.to_numpy(dtype="int64") + 30) <= LAST_DAY,
+        "ret30": np.isin(ret_keys, active_keys),
     }
 )
+assert not (first_view["ret30"] & ~first_view["obs30"]).any()  # 관찰할 수 없는 날짜에는 재방문이 있을 수 없다
 total += write(first_view, "first_view")
 
 # 3) 퍼널 (탭 3)
