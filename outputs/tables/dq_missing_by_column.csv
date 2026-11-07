@@ -1,0 +1,6 @@
+column,empty,whitespace_only,na_token,padded,missing_pct
+timestamp,0,0,0,0,0.0
+visitorid,0,0,0,0,0.0
+event,0,0,0,0,0.0
+itemid,0,0,0,0,0.0
+transactionid,2733644,0,0,0,99.185

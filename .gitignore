@@ -1,0 +1,15 @@
+# 데이터는 저장소에 올리지 않는다.
+#  - GitHub는 파일당 100MB를 넘으면 푸시를 거부한다(events_clean.csv 174MB 등).
+#  - 원본 데이터(Retailrocket)는 CC BY-NC-SA 4.0 라이선스라 재배포 조건을 따라야 한다. 출처는 data/raw/SOURCE.txt 참고.
+data/raw/*
+!data/raw/SOURCE.txt
+data/processed/*
+!data/processed/.gitkeep
+
+# 환경·시스템 파일
+.DS_Store
+__pycache__/
+*.pyc
+.venv/
+venv/
+.streamlit/secrets.toml

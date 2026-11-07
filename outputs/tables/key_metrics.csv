@@ -1,0 +1,6 @@
+﻿metric,event_table,visitor_table,match
+"활성 사용자 수 (view·addtocart·transaction 중 1회 이상, 고유 방문자)",1395013,1395013,True
+"구매자 수 (transaction 1회 이상, 고유 방문자)",11614,11614,True
+구매 횟수 (고유 transactionid),17504,17504,True
+장바구니에 담은 횟수 (addtocart 행),68291,68291,True
+이벤트 횟수 (전체 행),2730238,2730238,True

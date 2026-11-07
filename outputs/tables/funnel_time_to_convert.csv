@@ -1,0 +1,3 @@
+﻿stage,visitors,median_hours,p75_hours,p90_hours,within_1h_pct,within_24h_pct,within_7d_pct,after_7d_pct
+View → 장바구니,31280,0.06,0.63,105.67,77.1,85.4,91.5,8.5
+View → 구매,9497,0.4,11.84,235.09,62.4,79.2,88.2,11.8

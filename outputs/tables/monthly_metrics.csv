@@ -1,0 +1,6 @@
+﻿year_month,active_users,buyers,purchase_count,addtocart_count,event_count,observed_days,calendar_days,is_partial_month,purchase_count_per_day,addtocart_count_per_day,event_count_per_day
+2015-05,307574,2546,3687,14318,590584,28.87,31,True,127.7,495.9,20456.7
+2015-06,313832,2728,4037,15031,610313,30.0,30,False,134.6,501.0,20343.8
+2015-07,377199,2971,4441,17250,697849,31.0,31,False,143.3,556.5,22511.3
+2015-08,311128,2498,3660,14725,553237,31.0,31,False,118.1,475.0,17846.4
+2015-09,160106,1184,1679,6967,278255,14.88,30,True,112.8,468.2,18699.9

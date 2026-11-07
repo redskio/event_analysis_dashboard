@@ -1,0 +1,8 @@
+﻿item,criterion,rows,note
+기준 테이블 행 수,events_clean.csv,2730238,
+조인 후 행 수,events_with_category.csv,2730238,left join 이므로 기준 행 수와 같아야 함
+매칭(카테고리 있음),category_match_status=matched,2076151,76.04%
+이력에 없는 상품,category_match_status=item_not_in_history,252796,9.26%
+상품 최초 이력 이전 이벤트,category_match_status=before_first_history,401291,14.70%
+매칭됐지만 root 카테고리 결측,root_categoryid is NA & matched,0,category_tree에서 root를 찾지 못한 경우
+조인 시 사용한 이력 행,item_category_history.csv,788214,"완전 중복 0, (itemid, 시각) 중복 0"

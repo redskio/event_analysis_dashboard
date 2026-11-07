@@ -1,0 +1,4 @@
+﻿step,criterion,rows_removed,rows_after,detail
+원본,data/raw/events.csv,0,2756101,
+완전 중복 제거,"모든 열 동일, 첫 행 유지",460,2755641,"{'addtocart': 366, 'view': 94}"
+기간 제외,timestamp >= 2015-09-15 21:00:00+00:00,25403,2730238,"{'view': 24512, 'addtocart': 675, 'transaction': 216}"
