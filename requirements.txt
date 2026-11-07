@@ -1,4 +1,8 @@
-pandas>=2.2
+# 대시보드(analysis/07_dashboard.py) 배포에 필요한 패키지는 Python 3.13에서 아래 버전으로 실행을 확인했다.
+# Streamlit Community Cloud에서는 배포 화면의 Advanced settings에서 Python 3.13을 선택한다.
+streamlit==1.67.0
+pandas==3.1.1
+plotly==7.1.0
+pyarrow==26.0.1
+# 분석 스크립트(analysis/)용. 대시보드에는 필요하지 않다.
 matplotlib>=3.8
-plotly>=5.24
-streamlit>=1.40

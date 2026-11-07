@@ -20,4 +20,5 @@
 - 활성 사용자는 view, addtocart, transaction 중 하나라도 수행한 고유 방문자, 구매 횟수는 고유 `transactionid` 수로 센다. 데이터에 금액·가격·수량 정보가 없으므로 구매 금액 지표는 만들지 않는다.
 - 퍼널은 고유 방문자 기준으로 View → AddToCart → Transaction 순서를 지킨 경우만 다음 단계로 센다(상품 무관, 같은 시각은 이후로 인정). 시간 제한 퍼널(24시간·7일)은 첫 view부터 모든 단계가 제한 시간 이내여야 하며, 제한 시간을 끝까지 관찰할 수 있는 방문자(첫 view가 종료 시각 − 제한 시간 이전)만 대상으로 한다.
 - 카테고리별 퍼널은 방문자의 첫 조회 시점 카테고리로 나누고, 카테고리 미확인은 따로 집계한다. 전환율 순위에는 분모의 최소 표본 수를 둔다.
+- 대시보드(`analysis/07_dashboard.py`)는 `data/processed/dashboard/`의 parquet만 읽는다. 원천 CSV가 바뀌면 `analysis/19_export_dashboard_data.py`를 다시 실행한다. 이 폴더가 저장소(GitHub)에 올리는 유일한 데이터이며, 그 밖의 데이터(`data/raw`, `data/processed`의 CSV)는 `.gitignore`로 제외한다.
 - 전처리 기준과 파생 데이터 정의는 `전처리_기준서.md`에 정리한다. 기준을 바꾸면 이 문서도 함께 갱신한다.

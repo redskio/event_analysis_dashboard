@@ -1,0 +1,13 @@
+Dashboard data: derived from the Retailrocket recommender system dataset
+Provider: Retailrocket / Roman Zykov
+Source: https://www.kaggle.com/datasets/retailrocket/ecommerce-dataset
+License: CC BY-NC-SA 4.0 - https://creativecommons.org/licenses/by-nc-sa/4.0/
+
+Changes made: the parquet files in this folder were derived from events.csv (original event log) and the category
+history extracted from the dataset's item_properties files. Exact duplicate rows were removed, events at or after
+2015-09-15 21:00 UTC were dropped, product categories were joined as of each event's time, and the events were
+restructured into visitor-level tables (first view, 24-hour funnel, daily activity). See analysis/19_export_dashboard_data.py
+and the project's preprocessing notes for the exact steps. No original file is redistributed.
+
+Use: non-commercial, educational. Adaptations and redistribution must follow the source license
+(attribution, NonCommercial, ShareAlike).

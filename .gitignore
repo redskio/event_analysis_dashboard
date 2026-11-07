@@ -5,6 +5,8 @@ data/raw/*
 !data/raw/SOURCE.txt
 data/processed/*
 !data/processed/.gitkeep
+# 대시보드 배포용 parquet(33MB)만 올린다. data/processed/dashboard/SOURCE.txt에 출처·라이선스가 있다.
+!data/processed/dashboard/
 
 # 환경·시스템 파일
 .DS_Store

@@ -1,15 +1,17 @@
 """퍼널 주요 지표·추이, 카테고리별 첫 조회 성과, 퍼널, 리텐션 Streamlit 대시보드.
 
 실행: 프로젝트 루트에서 streamlit run analysis/07_dashboard.py
-입력:
-  data/processed/events_clean.csv          (탭 1: 주요 지표·추이, UTC 기준, 완전 중복 제거, 2015-09-15 21:00 UTC 미만)
-  data/processed/first_view_visitors.csv   (탭 2: 카테고리별 첫 조회 성과, analysis/10_first_view_table.py로 생성)
-  data/processed/funnel_visitors.csv       (탭 3: 퍼널, 24시간 전환 기준, analysis/12_funnel_visitors.py로 생성)
-  data/processed/retention_visitor_days.csv (탭 4: 리텐션, analysis/16_retention_by_category.py로 생성)
+입력: data/processed/dashboard/*.parquet (analysis/19_export_dashboard_data.py가 data/processed의 CSV에서 만든 배포용 파일, 약 33MB)
+  events.parquet     탭 1: 주요 지표·추이 (UTC 기준, 완전 중복 제거, 2015-09-15 21:00 UTC 미만)
+  first_view.parquet 탭 2: 카테고리별 첫 조회 성과
+  funnel.parquet     탭 3: 퍼널(24시간 전환 기준)
+  retention.parquet  탭 4: 리텐션
+  meta.json          데이터 시작 시각
 지표 정의는 05_key_metrics.py, 06_monthly_metrics.py, 09_first_view_category.py와 같다.
 N-day 재방문은 14_retention_curve.py, 15_retention_by_behavior.py와 같다(정확히 N일째 날짜의 활동, 분모는 N일째를 관찰할 수 있는 방문자).
 코호트 히트맵의 일별 값은 17_retention_cohort_heatmap.py와 같다.
 """
+import json
 from pathlib import Path
 
 import numpy as np
@@ -18,10 +20,13 @@ import plotly.graph_objects as go
 import streamlit as st
 
 ROOT = Path(__file__).resolve().parents[1]
-EVENTS = ROOT / "data" / "processed" / "events_clean.csv"
-FIRST_VIEW = ROOT / "data" / "processed" / "first_view_visitors.csv"
-FUNNEL = ROOT / "data" / "processed" / "funnel_visitors.csv"
-RETENTION = ROOT / "data" / "processed" / "retention_visitor_days.csv"
+DASH_DATA = ROOT / "data" / "processed" / "dashboard"
+EVENTS = DASH_DATA / "events.parquet"
+FIRST_VIEW = DASH_DATA / "first_view.parquet"
+FUNNEL = DASH_DATA / "funnel.parquet"
+RETENTION = DASH_DATA / "retention.parquet"
+META = DASH_DATA / "meta.json"
+DAY0_MS = pd.Timestamp("2015-05-03").value // 1_000_000  # parquet의 day 열은 2015-05-03 00:00 UTC부터의 일수
 # CLAUDE.md의 분석 기준: 이 시각 미만만 사용. 시작은 데이터의 첫 이벤트 시각.
 DATA_END = pd.Timestamp("2015-09-15 21:00:00")
 LAST_DATE = (DATA_END - pd.Timedelta(seconds=1)).normalize()  # 마지막 관측일(UTC)
@@ -51,41 +56,36 @@ st.markdown(
 
 
 # ── 데이터 ─────────────────────────────────────────────────
+def day_to_datetime(days):
+    """parquet의 day(2015-05-03부터의 일수, UTC) → 그날 00:00 UTC의 datetime."""
+    return pd.to_datetime(DAY0_MS + days.astype("int64") * 86_400_000, unit="ms")
+
+
 @st.cache_data(show_spinner="이벤트 데이터를 불러오는 중입니다...")
 def load_events():
-    df = pd.read_csv(
-        EVENTS,
-        usecols=["timestamp", "visitorid", "event", "transactionid"],
-        dtype={"visitorid": "int32", "event": "category", "transactionid": "float64"},
-    )
-    ts = pd.to_datetime(df["timestamp"], unit="ms")  # UTC 기준, 시간대 변환 없음
-    df["date"] = ts.dt.normalize()
+    df = pd.read_parquet(EVENTS)
+    df["transactionid"] = df["transactionid"].where(df["transactionid"] >= 0).astype("float64")  # -1은 결측(구매가 아닌 행)
+    df["date"] = day_to_datetime(df["day"])  # UTC 기준, 시간대 변환 없음
     df["month"] = df["date"].dt.to_period("M").dt.to_timestamp()
-    return df.drop(columns="timestamp"), ts.min()
+    data_start = pd.to_datetime(json.loads(META.read_text(encoding="utf-8"))["data_start_ms"], unit="ms")
+    return df.drop(columns="day"), data_start
 
 
 @st.cache_data(show_spinner="첫 조회 데이터를 불러오는 중입니다...")
 def load_first_view():
     if not FIRST_VIEW.exists():
         return None
-    fv = pd.read_csv(
-        FIRST_VIEW,
-        usecols=["visitorid", "first_view_date", "first_view_in_first_4weeks", "itemid", "categoryid", "root_categoryid",
-                 "carted_after_first_view", "purchased_after_first_view"],
-        dtype={"visitorid": "int32", "itemid": "int32", "categoryid": "Int64", "root_categoryid": "Int64"},
-    )
-    fv["categoryid"] = fv["categoryid"].fillna(UNKNOWN).astype("int32")
-    fv["root_categoryid"] = fv["root_categoryid"].fillna(UNKNOWN).astype("int32")
-    fv["date"] = pd.to_datetime(fv["first_view_date"]).astype("datetime64[ns]")
-    fv = fv.rename(columns={"carted_after_first_view": "carted", "purchased_after_first_view": "purchased",
-                            "first_view_in_first_4weeks": "early"})
+    fv = pd.read_parquet(FIRST_VIEW)  # categoryid·root_categoryid의 -1(=UNKNOWN)은 카테고리를 알 수 없는 첫 조회
+    fv["categoryid"] = fv["categoryid"].astype("int32")
+    fv["root_categoryid"] = fv["root_categoryid"].astype("int32")
+    fv["date"] = day_to_datetime(fv["day"]).astype("datetime64[ns]")
     # 30일 재방문: 첫 조회일로부터 정확히 30일째 날짜에 이벤트(종류·상품 무관)가 있으면 재방문으로 센다.
     day30 = fv["date"] + pd.Timedelta(days=30)
     fv["obs30"] = day30 <= LAST_DATE  # 30일째가 관측 기간 안에 있는 방문자만 분모에 넣는다
     active = load_events()[0][["visitorid", "date"]].drop_duplicates().astype({"date": "datetime64[ns]"})
     returned = pd.MultiIndex.from_frame(active)
     fv["ret30"] = pd.MultiIndex.from_arrays([fv["visitorid"], day30], names=["visitorid", "date"]).isin(returned)
-    return fv.drop(columns="first_view_date")
+    return fv.drop(columns="day")
 
 
 # ── 탭 1: 주요 지표와 추이 ──────────────────────────────────
@@ -144,7 +144,7 @@ def render_category_scatter(fv, start_date, end_date):
     """카테고리별 장바구니 전환율(x)·구매 전환율(y) 산포도. 풍선 크기는 첫 조회 방문자 수, 색은 대분류."""
     st.subheader("카테고리별 전환율 산포도")
     if fv is None:
-        st.info("산포도에는 첫 조회 데이터(data/processed/first_view_visitors.csv)가 필요합니다. 먼저 `python analysis/10_first_view_table.py`를 실행하세요.")
+        st.info("산포도에는 첫 조회 데이터(data/processed/dashboard/first_view.parquet)가 필요합니다. 먼저 `python analysis/19_export_dashboard_data.py`를 실행하세요.")
         return
     c1, c2 = st.columns([2, 3])
     min_v = int(c1.number_input(
@@ -439,7 +439,7 @@ def bar_chart(labels, values, visitors, metric, selected=None, overall=None, hei
 
 def render_first_view_tab(fv, start_date, end_date):
     if fv is None:
-        st.error("첫 조회 데이터(data/processed/first_view_visitors.csv)가 없습니다. 먼저 `python analysis/10_first_view_table.py`를 실행하세요.")
+        st.error("첫 조회 데이터(data/processed/dashboard/first_view.parquet)가 없습니다. 먼저 `python analysis/19_export_dashboard_data.py`를 실행하세요.")
         return
     exclude_early = st.checkbox(
         "시작 4주(2015-05-03~05-30)에 처음 조회한 방문자 제외",
@@ -655,21 +655,14 @@ STAGE_COLORS = ["#1f4e8c", "#2a6fbb", "#5b97d3"]
 def load_funnel():
     if not FUNNEL.exists():
         return None
-    f = pd.read_csv(
-        FUNNEL,
-        usecols=["first_view_date", "first_view_in_first_4weeks", "root_categoryid", "categoryid", "view_to_cart_ms", "cart_to_buy_ms",
-                 "views_before_cart", "carts_before_buy", "converted_cart_24h", "converted_buy_24h", "observable_24h"],
-        dtype={"root_categoryid": "Int64", "categoryid": "Int64", "view_to_cart_ms": "float64", "cart_to_buy_ms": "float64",
-               "views_before_cart": "float64", "carts_before_buy": "float64"},
-    )
-    f["root_categoryid"] = f["root_categoryid"].fillna(UNKNOWN).astype("int32")
-    f["categoryid"] = f["categoryid"].fillna(UNKNOWN).astype("int32")
-    f["date"] = pd.to_datetime(f["first_view_date"])
-    f["v2c_min"] = (f["view_to_cart_ms"] / 60000).where(f["converted_cart_24h"])  # 전환한 방문자만
-    f["c2b_min"] = (f["cart_to_buy_ms"] / 60000).where(f["converted_buy_24h"])
-    f["views_n"] = f["views_before_cart"].where(f["converted_cart_24h"])
-    f["carts_n"] = f["carts_before_buy"].where(f["converted_buy_24h"])
-    f = f.rename(columns={"converted_cart_24h": "c24", "converted_buy_24h": "b24", "observable_24h": "obs", "first_view_in_first_4weeks": "early"})
+    f = pd.read_parquet(FUNNEL)  # 소요 시간·횟수는 24시간 이내 전환한 방문자만 값이 있고 나머지는 -1(결측)
+    f["root_categoryid"] = f["root_categoryid"].astype("int32")
+    f["categoryid"] = f["categoryid"].astype("int32")
+    f["date"] = day_to_datetime(f["day"])
+    f["v2c_min"] = (f["v2c_ms"].astype("float64") / 60000).where(f["v2c_ms"] >= 0)
+    f["c2b_min"] = (f["c2b_ms"].astype("float64") / 60000).where(f["c2b_ms"] >= 0)
+    f["views_n"] = f["views_n"].astype("float64").where(f["views_n"] >= 0)
+    f["carts_n"] = f["carts_n"].astype("float64").where(f["carts_n"] >= 0)
     return f[["date", "early", "obs", "root_categoryid", "categoryid", "c24", "b24", "v2c_min", "c2b_min", "views_n", "carts_n"]]
 
 
@@ -802,7 +795,7 @@ def funnel_table(g, first_col, metric, limit=None, excluded=0, min_n=0):
 
 def render_funnel_tab(f, start_date, end_date):
     if f is None:
-        st.error("퍼널 데이터(data/processed/funnel_visitors.csv)가 없습니다. 먼저 `python analysis/12_funnel_visitors.py`를 실행하세요.")
+        st.error("퍼널 데이터(data/processed/dashboard/funnel.parquet)가 없습니다. 먼저 `python analysis/19_export_dashboard_data.py`를 실행하세요.")
         return
     exclude_early = st.checkbox(
         "시작 4주(2015-05-03~05-30)에 처음 조회한 방문자 제외", value=False, key="funnel_early",
@@ -966,8 +959,11 @@ RET_LABEL_TO_GRAIN = {v["label"]: k for k, v in RET_GRAINS.items()}
 def load_retention():
     if not RETENTION.exists():
         return None
-    v = pd.read_csv(RETENTION, dtype={"visitorid": "int32", "root_categoryid": "int32", "categoryid": "int32", "buy": "bool", "buy_root_categoryid": "int32", "buy_categoryid": "int32"})
-    v["date"] = pd.to_datetime(v["date"]).astype("datetime64[ns]")
+    v = pd.read_parquet(RETENTION)
+    for col in ["root_categoryid", "categoryid", "buy_root_categoryid", "buy_categoryid"]:
+        v[col] = v[col].astype("int32")
+    v["date"] = day_to_datetime(v["day"]).astype("datetime64[ns]")
+    v = v.drop(columns="day")
     return v.sort_values(["visitorid", "date"], kind="stable").reset_index(drop=True)
 
 
@@ -1220,7 +1216,7 @@ def render_cohort_heatmap(r, grain, metric, n_range, start_date, end_date, exclu
 
 def render_retention_tab(r):
     if r is None:
-        st.error("리텐션 데이터(data/processed/retention_visitor_days.csv)가 없습니다. 먼저 `python analysis/16_retention_by_category.py`를 실행하세요.")
+        st.error("리텐션 데이터(data/processed/dashboard/retention.parquet)가 없습니다. 먼저 `python analysis/19_export_dashboard_data.py`를 실행하세요.")
         return
     first_date, last_date = pd.Timestamp("2015-05-03").date(), LAST_DATE.date()
     picked = st.date_input(
@@ -1418,12 +1414,15 @@ def render_retention_tab(r):
 
 
 # ── 공통 상단 ─────────────────────────────────────────────
+if not EVENTS.exists():
+    st.error("대시보드 데이터(data/processed/dashboard/)가 없습니다. 먼저 `python analysis/19_export_dashboard_data.py`를 실행하세요.")
+    st.stop()
 events, data_start = load_events()
 min_date, max_date = data_start.normalize().date(), (DATA_END - pd.Timedelta(seconds=1)).normalize().date()
 
 st.title("📊 퍼널 주요 지표 대시보드")
 st.caption(
-    f"Retailrocket 이벤트 데이터 · 모든 날짜·시각은 UTC 기준 · 분석 가능 기간 {min_date} ~ {max_date} "
+    f"출처: Retailrocket 추천 시스템 데이터셋(CC BY-NC-SA 4.0, 비영리·교육 목적) · 모든 날짜·시각은 UTC 기준 · 분석 가능 기간 {min_date} ~ {max_date} "
     f"(완전 중복 제거, {DATA_END:%Y-%m-%d %H:%M} UTC 미만)"
 )
 
